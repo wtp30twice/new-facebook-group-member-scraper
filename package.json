@@ -53,7 +53,6 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "postinstall": "node scripts/patch-crawlee-log.js"
-
   },
   "devDependencies": {
     "@types/lodash": "^4.14.192",
