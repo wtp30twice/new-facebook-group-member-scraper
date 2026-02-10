@@ -1,3 +1,13 @@
+// Patch @apify/log to accept any level
+const OriginalLog = require('@apify/log');
+const originalConstructor = OriginalLog.prototype.constructor;
+OriginalLog.prototype.constructor = function (options: any = {}) {
+  if (options.level !== undefined && typeof options.level !== 'number') {
+    options.level = 4; // Force INFO level
+  }
+  return originalConstructor.call(this, options);
+};
+
 import type { PlaywrightCrawlerOptions } from 'crawlee';
 import { runCrawleeOne, logLevelHandlerWrapper } from 'crawlee-one';
 
