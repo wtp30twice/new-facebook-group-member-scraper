@@ -57,7 +57,9 @@ allActorInputs.maxRequestRetries.prefill = 5;
 allActorInputs.maxConcurrency.default = 5;
 allActorInputs.maxConcurrency.prefill = 5;
 if (allActorInputs.logLevel) {
-  delete allActorInputs.logLevel;
+  allActorInputs.logLevel.default = 4;
+  allActorInputs.logLevel.prefill = 4;
+  allActorInputs.logLevel.enum = [1, 2, 3, 4, 5];
 }
 
 const inputSchema = createActorInputSchema<
