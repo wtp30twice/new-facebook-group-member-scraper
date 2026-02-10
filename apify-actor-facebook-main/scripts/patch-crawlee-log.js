@@ -33,8 +33,8 @@ if (content.includes('LEVELS.INFO') && content.includes('@apify/log')) {
   process.exit(0);
 }
 
-// 1) Add LEVELS import at top (after "use strict" if present). @apify/log exports Log with Log.LEVELS.
-const logRequire = "const _ApifyLog = require('@apify/log'); const LEVELS = _ApifyLog.LEVELS || _ApifyLog.default?.LEVELS || { INFO: 4 };";
+// 1) Add exact require at top (after "use strict" if present): const { Log, LEVELS } = require('@apify/log');
+const logRequire = "const { Log, LEVELS } = require('@apify/log');";
 if (!content.includes('LEVELS.INFO')) {
   if (content.startsWith("'use strict';")) {
     content = content.replace("'use strict';", "'use strict';\n" + logRequire);
@@ -43,13 +43,11 @@ if (!content.includes('LEVELS.INFO')) {
   }
 }
 
-// 2) Force level to LEVELS.INFO when creating Log. Replace any "level: <value>" that appears near "new Log(".
-// Replace level: <anything> when it appears inside new Log({ ... })
+// 2) Force new Log({ ... }) to use level: LEVELS.INFO (fixes "Options level must be one of log.LEVELS enum!")
 content = content.replace(
   /(new\s+Log\s*\(\s*\{[^}]*?)level\s*:\s*[^,}\n]+/g,
   '$1level: LEVELS.INFO'
 );
-// Multiline (e.g. level on next line)
 content = content.replace(
   /(new\s+Log\s*\(\s*\{[\s\S]*?)level\s*:\s*[^,}\n]+/g,
   '$1level: LEVELS.INFO'
