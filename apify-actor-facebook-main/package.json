@@ -51,7 +51,8 @@
     "gen:readme": "node dist/cjs/cli/index.js gen-readme",
     "gen:all": "run-s \"gen:actor {1}\" \"gen:actorspec {1}\" \"gen:readme {1}\" --",
     "test": "vitest run",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "postinstall": "node scripts/patch-crawlee-log.js"
   },
   "devDependencies": {
     "@types/lodash": "^4.14.192",
