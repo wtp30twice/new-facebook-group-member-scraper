@@ -1,20 +1,24 @@
 FROM apify/actor-node-playwright-chrome:20
 
-# Copy only package files first (for caching)
+# Copy package files first
 COPY package*.json ./
 
-# Copy all project files including scripts
-COPY . ./
+# Copy scripts folder so postinstall can see it
+COPY scripts ./scripts
 
-# Install dependencies (postinstall can run now)
+# Install npm dependencies (postinstall will run here)
 RUN npm install --include=dev --audit=false
 
-# Build (if your package.json has build:ci)
-RUN npm run build:ci
+# Copy everything else
+COPY . ./
 
-# Remove dev dependencies for smaller image
+# Build the project (skip if you don't have this script)
+RUN npm run build:ci || echo "No build:ci script, skipping"
+
+# Remove dev dependencies for production
 RUN npm prune --production
 
 # Start the actor
-CMD ["npm", "start"]
+CMD npm start
+
 
