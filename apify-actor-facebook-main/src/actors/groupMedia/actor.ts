@@ -88,16 +88,12 @@ function getLabelForUrl(url: string): FbGroupMediaRouteLabel | null {
   return null;
 }
 
-/** Open default request queue, add startUrls from input (with route label so crawler dispatches), return the queue */
-async function seedRequestQueueFromStartUrls(): Promise<Awaited<ReturnType<typeof Actor.openRequestQueue>> | null> {
-  const input = (await Actor.getInput()) as FbGroupMediaActorInput | null;
-  const startUrls = input?.startUrls;
-  const reqQueue = await Actor.openRequestQueue();
-  if (!startUrls || !Array.isArray(startUrls) || startUrls.length === 0) {
-    console.log('[seedRequestQueue] No startUrls in input — queue may be empty');
-    return reqQueue;
-  }
-  const requests = startUrls
+/** Transform startUrls into request-shaped items with userData.label so crawlee-one's own startUrls processing uses labels */
+function transformStartUrlsToLabeledRequests(
+  startUrls: FbGroupMediaActorInput['startUrls']
+): Array<{ url: string; userData: { label?: string } }> {
+  if (!startUrls || !Array.isArray(startUrls)) return [];
+  return startUrls
     .map((item) => {
       const url = typeof item === 'string' ? item : (item as { url: string })?.url;
       if (!url) return null;
@@ -105,8 +101,17 @@ async function seedRequestQueueFromStartUrls(): Promise<Awaited<ReturnType<typeo
       return { url, userData: { label: label ?? undefined } };
     })
     .filter((r): r is { url: string; userData: { label?: string } } => r != null);
+}
+
+/** Open default request queue, add labeled requests from transformed startUrls, return the queue */
+async function seedRequestQueueFromStartUrls(
+  transformedInput: FbGroupMediaActorInput | null
+): Promise<Awaited<ReturnType<typeof Actor.openRequestQueue>> | null> {
+  const startUrls = transformedInput?.startUrls;
+  const reqQueue = await Actor.openRequestQueue();
+  const requests = transformStartUrlsToLabeledRequests(startUrls);
   if (requests.length === 0) {
-    console.log('[seedRequestQueue] startUrls had no valid URLs');
+    console.log('[seedRequestQueue] No startUrls in input — queue may be empty');
     return reqQueue;
   }
   await reqQueue.addRequests(requests);
@@ -117,31 +122,44 @@ async function seedRequestQueueFromStartUrls(): Promise<Awaited<ReturnType<typeo
 export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Promise<void> => {
   const pkgJson = getPackageJsonInfo(module, ['name']);
 
-  // Seed queue and get the same queue instance so we can pass it to the crawler (avoids crawlee-one using a different queue)
-  const requestQueue = await seedRequestQueueFromStartUrls();
+  // 1. Get raw input and transform startUrls to [{ url, userData: { label } }] BEFORE runCrawleeOne
+  const rawInput = (await Actor.getInput()) as FbGroupMediaActorInput | null;
+  const labeledStartUrls = transformStartUrlsToLabeledRequests(rawInput?.startUrls);
+  const transformedInput: FbGroupMediaActorInput | null = rawInput
+    ? { ...rawInput, startUrls: labeledStartUrls.length > 0 ? labeledStartUrls : rawInput.startUrls }
+    : null;
 
-  await runCrawleeOne<'playwright', FbGroupMediaRouteLabel, FbGroupMediaActorInput>({
-    actorType: 'playwright',
-    actorName: pkgJson.name,
-    actorConfig: {
-      validateInput,
-      routes,
-      routeHandlers: ({ input }) => createHandlers(input),
-      routeHandlerWrappers: ({ input }) => [
-        // logLevelHandlerWrapper('info'),
-        closePopupsRouterWrapper,
-      ],
-    },
-    crawlerConfigDefaults: {
-      ...crawlerConfigDefaults,
-      ...(requestQueue ? { requestQueue } : {}),
-    },
-    crawlerConfigOverrides,
-    onActorReady: async (actor) => {
-      await actor.runCrawler();
-    },
-  }).catch((err) => {
+  // 2. Override Actor.getInput so crawlee-one's internal startUrls processing sees labeled requests
+  const originalGetInput = Actor.getInput.bind(Actor);
+  Actor.getInput = async () => transformedInput;
+
+  try {
+    const requestQueue = await seedRequestQueueFromStartUrls(transformedInput);
+
+    await runCrawleeOne<'playwright', FbGroupMediaRouteLabel, FbGroupMediaActorInput>({
+      actorType: 'playwright',
+      actorName: pkgJson.name,
+      actorConfig: {
+        validateInput,
+        routes,
+        routeHandlers: ({ input }) => createHandlers(input),
+        routeHandlerWrappers: ({ input }) => [
+          closePopupsRouterWrapper,
+        ],
+      },
+      crawlerConfigDefaults: {
+        ...crawlerConfigDefaults,
+        ...(requestQueue ? { requestQueue } : {}),
+      },
+      crawlerConfigOverrides,
+      onActorReady: async (actor) => {
+        await actor.runCrawler();
+      },
+    });
+  } catch (err) {
     console.log(err);
     throw err;
-  });
+  } finally {
+    Actor.getInput = originalGetInput;
+  }
 };
