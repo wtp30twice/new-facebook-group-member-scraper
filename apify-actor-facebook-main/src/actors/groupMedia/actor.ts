@@ -15,8 +15,8 @@ import { Actor } from 'apify';
 import { createHandlers, routes } from './router';
 import { validateInput } from './validation';
 import { getPackageJsonInfo } from '../../utils/package';
-import type { FbGroupMediaRouteLabel } from './types';
 import type { FbGroupMediaActorInput } from './config';
+import type { FbGroupMediaRouteLabel } from './types';
 import { closePopupsRouterWrapper } from './pageActions/general';
 
 const FACEBOOK_DOMAIN = '.facebook.com';
@@ -76,7 +76,19 @@ const crawlerConfigDefaults: PlaywrightCrawlerOptions = {
   preNavigationHooks: [injectCookiesPreNav],
 };
 
-/** Open default request queue, add startUrls from input, and return the queue so the crawler uses the same one */
+/** Find first route whose match(url) returns true; return its handlerLabel so crawlee-one can dispatch */
+function getLabelForUrl(url: string): FbGroupMediaRouteLabel | null {
+  for (const route of routes) {
+    try {
+      if (route.match(url)) return route.handlerLabel as FbGroupMediaRouteLabel;
+    } catch {
+      // invalid URL or match error
+    }
+  }
+  return null;
+}
+
+/** Open default request queue, add startUrls from input (with route label so crawler dispatches), return the queue */
 async function seedRequestQueueFromStartUrls(): Promise<Awaited<ReturnType<typeof Actor.openRequestQueue>> | null> {
   const input = (await Actor.getInput()) as FbGroupMediaActorInput | null;
   const startUrls = input?.startUrls;
@@ -85,16 +97,20 @@ async function seedRequestQueueFromStartUrls(): Promise<Awaited<ReturnType<typeo
     console.log('[seedRequestQueue] No startUrls in input — queue may be empty');
     return reqQueue;
   }
-  const requests = startUrls.map((item) => {
-    const url = typeof item === 'string' ? item : (item as { url: string })?.url;
-    return url ? { url } : null;
-  }).filter(Boolean) as { url: string }[];
+  const requests = startUrls
+    .map((item) => {
+      const url = typeof item === 'string' ? item : (item as { url: string })?.url;
+      if (!url) return null;
+      const label = getLabelForUrl(url);
+      return { url, userData: { label: label ?? undefined } };
+    })
+    .filter((r): r is { url: string; userData: { label?: string } } => r != null);
   if (requests.length === 0) {
     console.log('[seedRequestQueue] startUrls had no valid URLs');
     return reqQueue;
   }
   await reqQueue.addRequests(requests);
-  console.log(`[seedRequestQueue] Added ${requests.length} start URL(s) to the request queue`);
+  console.log(`[seedRequestQueue] Added ${requests.length} start URL(s) with route labels to the request queue`);
   return reqQueue;
 }
 
