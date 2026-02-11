@@ -16,6 +16,8 @@ import actorSpec from './actorspec';
 export type FbGroupMediaCustomActorInput = {
   /** Maximum members to scrape; 0 = unlimited */
   maxMembers?: number | null;
+  /** Facebook login cookies (e.g. c_user=...; xs=...; fr=...). Injected into browser so the actor runs logged in. */
+  cookies?: string | null;
 };
 
 /** Shape of the data passed to the actor from Apify */
@@ -32,6 +34,13 @@ const customActorInput = {
     description: 'Stop after scraping this many unique members. Set to 0 for unlimited.',
     default: 10000,
     minimum: 0,
+    nullable: true,
+  } as Field,
+  cookies: {
+    title: 'Facebook cookies',
+    type: 'string',
+    description: 'Login cookies (e.g. c_user=...; xs=...; fr=...). Injected into browser so the actor runs logged in.',
+    default: null,
     nullable: true,
   } as Field,
   // listingCountOnly: createBooleanField({

@@ -10,6 +10,7 @@ OriginalLog.prototype.constructor = function (options: any = {}) {
 
 import type { PlaywrightCrawlerOptions } from 'crawlee';
 import { runCrawleeOne, logLevelHandlerWrapper } from 'crawlee-one';
+import { Actor } from 'apify';
 
 import { createHandlers, routes } from './router';
 import { validateInput } from './validation';
@@ -18,24 +19,53 @@ import type { FbGroupMediaRouteLabel } from './types';
 import type { FbGroupMediaActorInput } from './config';
 import { closePopupsRouterWrapper } from './pageActions/general';
 
+const FACEBOOK_DOMAIN = '.facebook.com';
+const FACEBOOK_PATH = '/';
+
+/** Parse "name1=value1; name2=value2" into Playwright cookie format for Facebook */
+function parseCookieString(cookieString: string): { name: string; value: string; domain: string; path: string }[] {
+  if (!cookieString || typeof cookieString !== 'string') return [];
+  return cookieString
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      const name = eq === -1 ? pair : pair.slice(0, eq).trim();
+      const value = eq === -1 ? '' : pair.slice(eq + 1).trim();
+      return {
+        name,
+        value,
+        domain: FACEBOOK_DOMAIN,
+        path: FACEBOOK_PATH,
+      };
+    })
+    .filter((c) => c.name);
+}
+
+/** Injects Facebook cookies from actor input into the browser context before navigation */
+async function injectCookiesPreNav({
+  page,
+  request,
+}: {
+  page: { context: () => { addCookies: (c: unknown[]) => Promise<void> } };
+  request: { url: string };
+}) {
+  if (!request?.url?.includes('facebook.com')) return;
+  const input = (await Actor.getInput()) as FbGroupMediaActorInput | null;
+  const raw = input?.cookies ?? null;
+  if (!raw) return;
+  const cookies = parseCookieString(raw);
+  if (cookies.length === 0) return;
+  await page.context().addCookies(cookies);
+}
+
 /** Crawler options that **may** be overriden by user input */
 const crawlerConfigDefaults: PlaywrightCrawlerOptions = {
   maxRequestsPerMinute: 120,
-  // NOTE: 24-hour timeout. We need high timeout for albums or lists that might have
-  // MANY items.
-  // During local test, scraper was getting around album 2-4 links per second.
-  // If we assume there might be albums with 20k and more photos, that would take 5-6 hrs.
-  //
-  // Hence, 24 hr timeout should handle up to 85k entries. But assuming that the page will
-  // be clogged up with HTML and data at such amounts, maybe those 50-60k entries per single
-  // request handler is more sensinble.
   requestHandlerTimeoutSecs: 60 * 60 * 24,
   headless: true,
-
-  // SHOULD I USE THESE?
-  // See https://docs.apify.com/academy/expert-scraping-with-apify/solutions/rotating-proxies
-  // useSessionPool: true,
-  // sessionPoolOptions: {},
+  preNavigationHooks: [injectCookiesPreNav],
 };
 
 export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Promise<void> => {
