@@ -8,7 +8,7 @@ console.log('[groupMedia/validation] loaded — schema includes cookies');
 const inputValidationSchema = Joi.object<FbGroupMemberActorInput>({
   ...allActorInputValidationFields,
   maxMembers: Joi.number().integer().min(0).allow(null).optional(),
-  cookies: Joi.string().allow('', null).optional(),
+  cookies: Joi.string().optional(),
 } as any).unknown(true);
 
 export const validateInput = (input: FbGroupMemberActorInput | null) => {
