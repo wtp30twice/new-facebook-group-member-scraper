@@ -8,15 +8,19 @@ OriginalLog.prototype.constructor = function (options: any = {}) {
   return originalConstructor.call(this, options);
 };
 
-import { PlaywrightCrawler } from 'crawlee';
+import type { PlaywrightCrawlerOptions } from 'crawlee';
+import { runCrawleeOne } from 'crawlee-one';
 import { Actor } from 'apify';
 
+import { createHandlers, routes } from './router';
+import { validateInput } from './validation';
+import { getPackageJsonInfo } from '../../utils/package';
+import type { FbGroupMediaRouteLabel } from './types';
 import type { FbGroupMediaActorInput } from './config';
+import { closePopupsRouterWrapper } from './pageActions/general';
 
 const FACEBOOK_DOMAIN = '.facebook.com';
 const FACEBOOK_PATH = '/';
-
-const DEFAULT_GROUP_URL = 'https://www.facebook.com/groups/1209330427840782';
 
 /** Parse "name1=value1; name2=value2" into Playwright cookie format for Facebook */
 function parseCookieString(cookieString: string): { name: string; value: string; domain: string; path: string }[] {
@@ -39,54 +43,47 @@ function parseCookieString(cookieString: string): { name: string; value: string;
     .filter((c) => c.name);
 }
 
-export const run = async (): Promise<void> => {
+/** Injects Facebook cookies from actor input into the browser context before navigation */
+async function injectCookiesPreNav({
+  page,
+  request,
+}: {
+  page: { context: () => { addCookies: (c: unknown[]) => Promise<void> } };
+  request: { url: string };
+}) {
+  const url = request?.url ?? '';
+  if (!url.includes('facebook.com')) return;
   const input = (await Actor.getInput()) as FbGroupMediaActorInput | null;
-  const startUrls = input?.startUrls ?? [];
-  const urls = startUrls
-    .map((item: string | { url?: string }) => (typeof item === 'string' ? item : item?.url))
-    .filter((u): u is string => !!u);
-  if (urls.length === 0) urls.push(DEFAULT_GROUP_URL);
+  const raw = input?.cookies ?? null;
+  if (!raw) return;
+  const cookies = parseCookieString(raw);
+  if (cookies.length === 0) return;
+  await page.context().addCookies(cookies);
+}
 
-  const crawler = new PlaywrightCrawler({
-    requestHandler: async ({ page, request }) => {
-      console.log('[CRAWLER] Processing:', request.url);
+const crawlerConfigDefaults: PlaywrightCrawlerOptions = {
+  maxRequestsPerMinute: 120,
+  requestHandlerTimeoutSecs: 60 * 60 * 24,
+  headless: true,
+  preNavigationHooks: [injectCookiesPreNav],
+};
 
-      // Load cookies
-      const inputNow = (await Actor.getInput()) as FbGroupMediaActorInput | null;
-      if (inputNow?.cookies) {
-        const cookies = parseCookieString(inputNow.cookies);
-        await page.context().addCookies(cookies);
-        console.log('[CRAWLER] Added', cookies.length, 'cookies');
-      }
+export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Promise<void> => {
+  const pkgJson = getPackageJsonInfo(module, ['name']);
 
-      // Navigate and wait
-      await page.goto(request.url);
-      await page.waitForLoadState('networkidle');
-
-      console.log('[CRAWLER] Page loaded, title:', await page.title());
-
-      // Save screenshot for debugging
-      try {
-        await Actor.setValue('screenshot.png', await page.screenshot());
-      } catch (e) {
-        console.log('[CRAWLER] Screenshot failed:', e);
-      }
-
-      // Basic member scraping
-      const members = await page.$$eval('[aria-label*="Member"]', (els) =>
-        els.map((el) => el.textContent).filter(Boolean)
-      );
-
-      console.log('[CRAWLER] Found', members.length, 'members');
-      await Actor.pushData({ members, url: request.url });
+  await runCrawleeOne<'playwright', FbGroupMediaRouteLabel, FbGroupMediaActorInput>({
+    actorType: 'playwright',
+    actorName: pkgJson.name,
+    actorConfig: {
+      validateInput,
+      routes,
+      routeHandlers: ({ input }) => createHandlers(input),
+      routeHandlerWrappers: [closePopupsRouterWrapper],
     },
-    maxRequestsPerCrawl: urls.length,
-    headless: true,
+    crawlerConfigDefaults,
+    crawlerConfigOverrides,
+    onActorReady: async (actor) => {
+      await actor.runCrawler();
+    },
   });
-
-  await crawler.addRequests(urls.map((url) => ({ url })));
-
-  console.log('[CRAWLER] Starting...');
-  await crawler.run();
-  console.log('[CRAWLER] Finished');
 };
