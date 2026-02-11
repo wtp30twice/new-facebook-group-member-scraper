@@ -19,5 +19,10 @@ if (!content.includes('cookies')) {
   process.exit(1);
 }
 
-console.log('OK: dist/cjs/actors/groupMedia/validation.js includes cookies in Joi schema.');
+if (!content.includes('[groupMedia/validation] loaded')) {
+  console.error('ERROR: validation.js does not contain build marker. Wrong file or stale build.');
+  process.exit(1);
+}
+
+console.log('OK: dist/cjs/actors/groupMedia/validation.js includes cookies and is current build.');
 process.exit(0);
