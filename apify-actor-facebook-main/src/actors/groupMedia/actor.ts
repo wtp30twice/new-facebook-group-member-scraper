@@ -88,54 +88,27 @@ function getLabelForUrl(url: string): FbGroupMediaRouteLabel | null {
   return null;
 }
 
-/** Transform startUrls into request-shaped items with userData.label so crawlee-one's own startUrls processing uses labels */
-function transformStartUrlsToLabeledRequests(
-  startUrls: FbGroupMediaActorInput['startUrls']
-): Array<{ url: string; userData: { label?: string } }> {
-  if (!startUrls || !Array.isArray(startUrls)) return [];
-  return startUrls
-    .map((item) => {
-      const url = typeof item === 'string' ? item : (item as { url: string })?.url;
+export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Promise<void> => {
+  const pkgJson = getPackageJsonInfo(module, ['name']);
+
+  // NUCLEAR: Get real startUrls and build labeled requests BEFORE runCrawleeOne (crawlee-one will see empty startUrls)
+  const rawInput = (await Actor.getInput()) as FbGroupMediaActorInput | null;
+  const realStartUrls = rawInput?.startUrls ?? [];
+  const labeledUrls = realStartUrls
+    .map((item: string | { url: string }) => {
+      const url = typeof item === 'string' ? item : item?.url;
       if (!url) return null;
       const label = getLabelForUrl(url);
       return { url, userData: { label: label ?? undefined } };
     })
     .filter((r): r is { url: string; userData: { label?: string } } => r != null);
-}
 
-/** Open default request queue, add labeled requests from transformed startUrls, return the queue */
-async function seedRequestQueueFromStartUrls(
-  transformedInput: FbGroupMediaActorInput | null
-): Promise<Awaited<ReturnType<typeof Actor.openRequestQueue>> | null> {
-  const startUrls = transformedInput?.startUrls;
-  const reqQueue = await Actor.openRequestQueue();
-  const requests = transformStartUrlsToLabeledRequests(startUrls);
-  if (requests.length === 0) {
-    console.log('[seedRequestQueue] No startUrls in input — queue may be empty');
-    return reqQueue;
-  }
-  await reqQueue.addRequests(requests);
-  console.log(`[seedRequestQueue] Added ${requests.length} start URL(s) with route labels to the request queue`);
-  return reqQueue;
-}
-
-export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Promise<void> => {
-  const pkgJson = getPackageJsonInfo(module, ['name']);
-
-  // 1. Get raw input and transform startUrls to [{ url, userData: { label } }] BEFORE runCrawleeOne
-  const rawInput = (await Actor.getInput()) as FbGroupMediaActorInput | null;
-  const labeledStartUrls = transformStartUrlsToLabeledRequests(rawInput?.startUrls);
-  const transformedInput: FbGroupMediaActorInput | null = rawInput
-    ? { ...rawInput, startUrls: labeledStartUrls.length > 0 ? labeledStartUrls : rawInput.startUrls }
-    : null;
-
-  // 2. Override Actor.getInput so crawlee-one's internal startUrls processing sees labeled requests
+  // Pass EMPTY startUrls to crawlee-one so it does nothing; we add requests ourselves in onActorReady
+  const emptyInput: FbGroupMediaActorInput | null = rawInput ? { ...rawInput, startUrls: [] } : null;
   const originalGetInput = Actor.getInput.bind(Actor);
-  Actor.getInput = async () => transformedInput;
+  Actor.getInput = async () => emptyInput;
 
   try {
-    const requestQueue = await seedRequestQueueFromStartUrls(transformedInput);
-
     await runCrawleeOne<'playwright', FbGroupMediaRouteLabel, FbGroupMediaActorInput>({
       actorType: 'playwright',
       actorName: pkgJson.name,
@@ -147,12 +120,16 @@ export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Pr
           closePopupsRouterWrapper,
         ],
       },
-      crawlerConfigDefaults: {
-        ...crawlerConfigDefaults,
-        ...(requestQueue ? { requestQueue } : {}),
-      },
+      crawlerConfigDefaults,
       crawlerConfigOverrides,
       onActorReady: async (actor) => {
+        console.log('[MANUAL QUEUE] Adding', labeledUrls.length, 'URLs with labels');
+        const queue = await Actor.openRequestQueue();
+        for (const req of labeledUrls) {
+          console.log('[MANUAL QUEUE] Adding:', req.url, 'with label:', req.userData.label);
+          await queue.addRequest(req);
+        }
+        console.log('[MANUAL QUEUE] Done adding URLs, starting crawler');
         await actor.runCrawler();
       },
     });
