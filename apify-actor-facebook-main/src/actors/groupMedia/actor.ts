@@ -51,13 +51,21 @@ async function injectCookiesPreNav({
   page: { context: () => { addCookies: (c: unknown[]) => Promise<void> } };
   request: { url: string };
 }) {
-  if (!request?.url?.includes('facebook.com')) return;
+  const url = request?.url ?? '';
+  if (!url.includes('facebook.com')) return;
   const input = (await Actor.getInput()) as FbGroupMediaActorInput | null;
   const raw = input?.cookies ?? null;
-  if (!raw) return;
+  if (!raw) {
+    console.log('[injectCookiesPreNav] No cookies in input — skipping');
+    return;
+  }
   const cookies = parseCookieString(raw);
-  if (cookies.length === 0) return;
+  if (cookies.length === 0) {
+    console.log('[injectCookiesPreNav] Parsed 0 cookies — check format (name1=val1; name2=val2)');
+    return;
+  }
   await page.context().addCookies(cookies);
+  console.log(`[injectCookiesPreNav] Injected ${cookies.length} cookies for ${url}`);
 }
 
 /** Crawler options that **may** be overriden by user input */
