@@ -9,8 +9,8 @@ let content = fs.readFileSync(actorJsPath, 'utf8');
 const before = content;
 
 content = content.replace(
-  /new\s+crawlee_1\.Log\s*\(\s*\{\s*level:\s*logLevel\s*\?\s*log_1\.logLevelToCrawlee\[logLevel\]\s*:\s*undefined\s*\}\s*\)/g,
-  "new crawlee_1.Log({ level: 'INFO' })"
+  /const log = new crawlee_1\.Log\(\{ level: logLevel \? log_1\.logLevelToCrawlee\[logLevel\] : undefined \}\);/g,
+  "const log = new crawlee_1.Log({ level: 4 });"
 );
 
 if (content === before) {
