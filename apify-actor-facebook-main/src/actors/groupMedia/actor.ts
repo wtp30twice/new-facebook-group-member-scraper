@@ -76,29 +76,33 @@ const crawlerConfigDefaults: PlaywrightCrawlerOptions = {
   preNavigationHooks: [injectCookiesPreNav],
 };
 
-/** Ensure startUrls from input are in the request queue before crawler runs (crawlee-one may not seed the queue) */
-async function seedRequestQueueFromStartUrls(): Promise<void> {
+/** Open default request queue, add startUrls from input, and return the queue so the crawler uses the same one */
+async function seedRequestQueueFromStartUrls(): Promise<Awaited<ReturnType<typeof Actor.openRequestQueue>> | null> {
   const input = (await Actor.getInput()) as FbGroupMediaActorInput | null;
   const startUrls = input?.startUrls;
+  const reqQueue = await Actor.openRequestQueue();
   if (!startUrls || !Array.isArray(startUrls) || startUrls.length === 0) {
     console.log('[seedRequestQueue] No startUrls in input — queue may be empty');
-    return;
+    return reqQueue;
   }
-  const reqQueue = await Actor.openRequestQueue();
   const requests = startUrls.map((item) => {
     const url = typeof item === 'string' ? item : (item as { url: string })?.url;
     return url ? { url } : null;
   }).filter(Boolean) as { url: string }[];
   if (requests.length === 0) {
     console.log('[seedRequestQueue] startUrls had no valid URLs');
-    return;
+    return reqQueue;
   }
   await reqQueue.addRequests(requests);
   console.log(`[seedRequestQueue] Added ${requests.length} start URL(s) to the request queue`);
+  return reqQueue;
 }
 
 export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Promise<void> => {
   const pkgJson = getPackageJsonInfo(module, ['name']);
+
+  // Seed queue and get the same queue instance so we can pass it to the crawler (avoids crawlee-one using a different queue)
+  const requestQueue = await seedRequestQueueFromStartUrls();
 
   await runCrawleeOne<'playwright', FbGroupMediaRouteLabel, FbGroupMediaActorInput>({
     actorType: 'playwright',
@@ -112,10 +116,12 @@ export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Pr
         closePopupsRouterWrapper,
       ],
     },
-    crawlerConfigDefaults,
+    crawlerConfigDefaults: {
+      ...crawlerConfigDefaults,
+      ...(requestQueue ? { requestQueue } : {}),
+    },
     crawlerConfigOverrides,
     onActorReady: async (actor) => {
-      await seedRequestQueueFromStartUrls();
       await actor.runCrawler();
     },
   }).catch((err) => {
