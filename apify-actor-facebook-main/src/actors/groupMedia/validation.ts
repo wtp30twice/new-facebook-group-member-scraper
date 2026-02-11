@@ -6,7 +6,7 @@ const inputValidationSchema = Joi.object<FbGroupMemberActorInput>({
   ...allActorInputValidationFields,
   maxMembers: Joi.number().integer().min(0).allow(null).optional(),
   cookies: Joi.string().allow('', null).optional(),
-} as any);
+} as any).unknown(true);
 
 export const validateInput = (input: FbGroupMemberActorInput | null) => {
   Joi.assert(input, inputValidationSchema);
