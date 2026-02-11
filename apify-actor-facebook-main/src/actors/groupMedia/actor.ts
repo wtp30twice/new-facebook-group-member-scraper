@@ -9,6 +9,7 @@ OriginalLog.prototype.constructor = function (options: any = {}) {
 };
 
 import type { PlaywrightCrawlerOptions } from 'crawlee';
+import type { CrawleeOneRouteWrapper } from 'crawlee-one';
 import { runCrawleeOne } from 'crawlee-one';
 import { Actor } from 'apify';
 
@@ -16,8 +17,10 @@ import { createHandlers, routes } from './router';
 import { validateInput } from './validation';
 import { getPackageJsonInfo } from '../../utils/package';
 import type { FbGroupMediaRouteLabel } from './types';
+import type { FbGroupMediaRouterContext } from './types';
 import type { FbGroupMediaActorInput } from './config';
 import { closePopupsRouterWrapper } from './pageActions/general';
+import type { PlaywrightCrawlingContext } from 'crawlee';
 
 const FACEBOOK_DOMAIN = '.facebook.com';
 const FACEBOOK_PATH = '/';
@@ -68,22 +71,80 @@ const crawlerConfigDefaults: PlaywrightCrawlerOptions = {
   preNavigationHooks: [injectCookiesPreNav],
 };
 
+/** Return handlerLabel for URL so requests get the correct route label (crawlee-one dispatches by userData.label). */
+function getLabelForUrl(url: string): FbGroupMediaRouteLabel | null {
+  for (const route of routes) {
+    try {
+      if (route.match(url)) return route.handlerLabel as FbGroupMediaRouteLabel;
+    } catch {
+      // invalid URL
+    }
+  }
+  return null;
+}
+
+/** DEBUG: Log request url + userData.label and confirm requestHandler is firing. */
+const debugRouteHandlerWrapper: CrawleeOneRouteWrapper<
+  PlaywrightCrawlingContext<any>,
+  FbGroupMediaRouterContext
+> = (origRouterHandler) => {
+  return (ctx, ...args) => {
+    const req = ctx.request as { url: string; userData?: { label?: string } };
+    const label = req?.userData?.label ?? '(no label)';
+    console.log('[DEBUG] requestHandler firing — url:', req?.url, 'userData.label:', label);
+    return origRouterHandler(ctx, ...args);
+  };
+};
+
 export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Promise<void> => {
   const pkgJson = getPackageJsonInfo(module, ['name']);
 
-  await runCrawleeOne<'playwright', FbGroupMediaRouteLabel, FbGroupMediaActorInput>({
-    actorType: 'playwright',
-    actorName: pkgJson.name,
-    actorConfig: {
-      validateInput,
-      routes,
-      routeHandlers: ({ input }) => createHandlers(input),
-      routeHandlerWrappers: [closePopupsRouterWrapper],
-    },
-    crawlerConfigDefaults,
-    crawlerConfigOverrides,
-    onActorReady: async (actor) => {
-      await actor.runCrawler();
-    },
-  });
+  const rawInput = (await Actor.getInput()) as FbGroupMediaActorInput | null;
+  const startUrls = rawInput?.startUrls ?? [];
+  const labeledRequests = startUrls
+    .map((item: string | { url?: string }) => {
+      const url = typeof item === 'string' ? item : item?.url;
+      if (!url) return null;
+      const label = getLabelForUrl(url);
+      if (!label) {
+        console.log('[DEBUG] No route match for url:', url);
+        return null;
+      }
+      return { url, userData: { label } };
+    })
+    .filter((r): r is { url: string; userData: { label: string } } => r != null);
+
+  const emptyInput: FbGroupMediaActorInput | null = rawInput ? { ...rawInput, startUrls: [] } : null;
+  const originalGetInput = Actor.getInput.bind(Actor);
+  Actor.getInput = async () => emptyInput;
+
+  const requestQueue = await Actor.openRequestQueue();
+  if (labeledRequests.length > 0) {
+    await requestQueue.addRequests(labeledRequests);
+    console.log('[DEBUG] Seeded queue with', labeledRequests.length, 'labeled request(s). First:', labeledRequests[0]?.url, 'label:', labeledRequests[0]?.userData?.label);
+  }
+
+  try {
+    await runCrawleeOne<'playwright', FbGroupMediaRouteLabel, FbGroupMediaActorInput>({
+      actorType: 'playwright',
+      actorName: pkgJson.name,
+      actorConfig: {
+        validateInput,
+        routes,
+        routeHandlers: ({ input }) => createHandlers(input),
+        routeHandlerWrappers: [debugRouteHandlerWrapper, closePopupsRouterWrapper],
+      },
+      crawlerConfigDefaults,
+      crawlerConfigOverrides: {
+        ...crawlerConfigOverrides,
+        requestQueue,
+      },
+      onActorReady: async (actor) => {
+        console.log('[DEBUG] onActorReady — starting runCrawler (queue should have', labeledRequests.length, 'request(s))');
+        await actor.runCrawler();
+      },
+    });
+  } finally {
+    Actor.getInput = originalGetInput;
+  }
 };
