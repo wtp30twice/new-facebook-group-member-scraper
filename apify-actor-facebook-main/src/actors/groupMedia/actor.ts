@@ -25,6 +25,8 @@ import type { PlaywrightCrawlingContext } from 'crawlee';
 const FACEBOOK_DOMAIN = '.facebook.com';
 const FACEBOOK_PATH = '/';
 
+const QUEUE_NAME = 'my-facebook-queue';
+
 /** Parse "name1=value1; name2=value2" into Playwright cookie format for Facebook */
 function parseCookieString(cookieString: string): { name: string; value: string; domain: string; path: string }[] {
   if (!cookieString || typeof cookieString !== 'string') return [];
@@ -119,7 +121,7 @@ export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Pr
   const originalGetInput = Actor.getInput.bind(Actor);
   Actor.getInput = async () => emptyInput;
 
-  const requestQueue = await Actor.openRequestQueue();
+  const requestQueue = await Actor.openRequestQueue(QUEUE_NAME);
   if (labeledRequests.length > 0) {
     await requestQueue.addRequests(labeledRequests);
     console.log('[DEBUG] Seeded queue with', labeledRequests.length, 'labeled request(s). First:', labeledRequests[0]?.url, 'label:', labeledRequests[0]?.userData?.label);
@@ -135,7 +137,10 @@ export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Pr
         routeHandlers: ({ input }) => createHandlers(input),
         routeHandlerWrappers: [debugRouteHandlerWrapper, closePopupsRouterWrapper],
       },
-      crawlerConfigDefaults,
+      crawlerConfigDefaults: {
+        ...crawlerConfigDefaults,
+        requestQueue,
+      },
       crawlerConfigOverrides: {
         ...crawlerConfigOverrides,
         requestQueue,
