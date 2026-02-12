@@ -103,7 +103,8 @@ export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Pr
   const startUrls = rawInput?.startUrls ?? [];
   const labeledRequests = startUrls
     .map((item: string | { url?: string }) => {
-      const url = typeof item === 'string' ? item : item?.url;
+      const raw = typeof item === 'string' ? item : item?.url;
+      const url = typeof raw === 'string' ? raw.trim() : '';
       if (!url) return null;
       const label = getLabelForUrl(url);
       if (!label) {
