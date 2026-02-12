@@ -124,6 +124,9 @@ export const run = async (crawlerConfigOverrides?: PlaywrightCrawlerOptions): Pr
   const requestQueue = await Actor.openRequestQueue(QUEUE_NAME);
   if (labeledRequests.length > 0) {
     await requestQueue.addRequests(labeledRequests);
+    for (const request of labeledRequests) {
+      console.log('[QUEUE DEBUG] Added request:', JSON.stringify(request, null, 2));
+    }
     console.log('[DEBUG] Seeded queue with', labeledRequests.length, 'labeled request(s). First:', labeledRequests[0]?.url, 'label:', labeledRequests[0]?.userData?.label);
   }
 
